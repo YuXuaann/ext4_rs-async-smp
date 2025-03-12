@@ -6,8 +6,9 @@ extern crate alloc;
 mod prelude;
 mod utils;
 
+use async_trait::async_trait;
 use prelude::*;
-use utils::*;
+use utils::{blockon::block_on, *};
 
 mod ext4_defs;
 mod ext4_impls;
@@ -68,8 +69,9 @@ enum ColorCode {
 #[derive(Debug)]
 pub struct Disk {}
 
+#[async_trait]
 impl BlockDevice for Disk {
-    fn read_offset(&self, offset: usize) -> Vec<u8> {
+    async fn read(&self, offset: usize) -> Vec<u8> {
         // log::info!("read_offset: {:x?}", offset);
         use std::fs::OpenOptions;
         use std::io::{Read, Seek};
@@ -85,7 +87,7 @@ impl BlockDevice for Disk {
         buf
     }
 
-    fn write_offset(&self, offset: usize, data: &[u8]) {
+    async fn write(&self, offset: usize, data: &[u8]) {
         use std::fs::OpenOptions;
         use std::io::{Seek, Write};
         let mut file = OpenOptions::new()
@@ -103,24 +105,24 @@ fn main() {
     log::set_logger(&SimpleLogger).unwrap();
     log::set_max_level(LevelFilter::Trace);
     let disk = Arc::new(Disk {});
-    let ext4 = Ext4::open(disk);
+    let ext4 = block_on(Ext4::open(disk));
 
     // file read
     let path = "test_files/0.txt";
     // 1G
     const READ_SIZE: usize = (0x100000 * 1024);
     let mut read_buf = vec![0u8; READ_SIZE as usize];
-    let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
+    let child_inode = block_on(ext4.generic_open(path, &mut 2, false, 0, &mut 0)).unwrap();
     let mut data = vec![0u8; READ_SIZE as usize];
-    let read_data = ext4.read_at(child_inode, 0 as usize, &mut data);
+    let read_data = block_on(ext4.read_at(child_inode, 0 as usize, &mut data));
     log::info!("read data  {:?}", &data[..10]);
 
     let path = "test_files/linktest";
     let mut read_buf = vec![0u8; READ_SIZE as usize];
     // 2 is root inode
-    let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
+    let child_inode = block_on(ext4.generic_open(path, &mut 2, false, 0, &mut 0)).unwrap();
     let mut data = vec![0u8; READ_SIZE as usize];
-    let read_data = ext4.read_at(child_inode, 0 as usize, &mut data);
+    let read_data = block_on(ext4.read_at(child_inode, 0 as usize, &mut data));
     log::info!("read data  {:?}", &data[..10]);
 
     // dir make
@@ -129,16 +131,16 @@ fn main() {
         let path = format!("dirtest{}", i);
         let path = path.as_str();
         log::info!("mkdir making {:?}", path);
-        let r = ext4.dir_mk(&path);
+        let r = block_on(ext4.dir_mk(&path));
         assert!(r.is_ok(), "dir make error {:?}", r.err());
     }
     let path = "dir1/dir2/dir3/dir4/dir5/dir6";
     log::info!("mkdir making {:?}", path);
-    let r = ext4.dir_mk(&path);
+    let r = block_on(ext4.dir_mk(&path));
     assert!(r.is_ok(), "dir make error {:?}", r.err());
 
     // dir ls
-    let entries = ext4.dir_get_entries(ROOT_INODE);
+    let entries = block_on(ext4.dir_get_entries(ROOT_INODE));
     log::info!("dir ls root");
     for entry in entries {
         log::info!("{:?}", entry.get_name());
@@ -146,29 +148,27 @@ fn main() {
 
     // file remove
     let path = "test_files/file_to_remove";
-    let r = ext4.file_remove(&path);
+    let r = block_on(ext4.file_remove(&path));
 
     // dir remove
     let path = "dir_to_remove";
-    let r = ext4.dir_remove(ROOT_INODE, &path);
+    let r = block_on(ext4.dir_remove(ROOT_INODE, &path));
 
     // file create/write
     log::info!("----create file----");
     let inode_mode = InodeFileType::S_IFREG.bits();
     let inode_perm = (InodePerm::S_IREAD | InodePerm::S_IWRITE).bits();
-    let inode_ref = ext4
-        .create(ROOT_INODE, "4G.txt", inode_mode | inode_perm)
-        .unwrap();
+    let inode_ref = block_on(ext4.create(ROOT_INODE, "4G.txt", inode_mode | inode_perm)).unwrap();
     log::info!("----write file----");
     const WRITE_SIZE: usize = (0x100000 * (4096));
     let write_buf = vec![0x41 as u8; WRITE_SIZE];
-    let r = ext4.write_at(inode_ref.inode_num, 0, &write_buf);
+    let r = block_on(ext4.write_at(inode_ref.inode_num, 0, &write_buf));
 
     // check
     let path = "4G.txt";
     let mut read_buf = vec![0u8; WRITE_SIZE as usize];
-    let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
+    let child_inode = block_on(ext4.generic_open(path, &mut 2, false, 0, &mut 0)).unwrap();
     let mut data = vec![0u8; WRITE_SIZE as usize];
-    let read_data = ext4.read_at(child_inode, 0 as usize, &mut data);
+    let read_data = block_on(ext4.read_at(child_inode, 0 as usize, &mut data));
     log::info!("read data  {:?}", &data[..10]);
 }
