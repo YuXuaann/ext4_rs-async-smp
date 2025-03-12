@@ -181,8 +181,7 @@ impl Ext4 {
                 .await?;
         } else {
             // Create a new leaf node
-            self.create_new_leaf(inode_ref, &mut search_path, newex)
-                .await?;
+            Box::pin(self.create_new_leaf(inode_ref, &mut search_path, newex)).await?;
         }
 
         Ok(())
