@@ -146,7 +146,7 @@ impl Ext4Superblock {
     }
 
     /// Returns the first data block.
-    pub fn first_data_block(&self) -> u32{
+    pub fn first_data_block(&self) -> u32 {
         self.first_data_block
     }
 
@@ -204,19 +204,19 @@ impl Ext4Superblock {
     }
 
     pub fn set_free_blocks_count(&mut self, free_blocks: u64) {
-        self.free_blocks_count_lo = (free_blocks & 0xffffffff) as u32; 
+        self.free_blocks_count_lo = (free_blocks & 0xffffffff) as u32;
 
         self.free_blocks_count_hi = (free_blocks >> 32) as u32;
     }
 
-    pub fn sync_to_disk(&self, block_device: Arc<dyn BlockDevice>) {
+    pub async fn sync_to_disk(&self, block_device: Arc<dyn BlockDevice>) {
         let data = unsafe {
             core::slice::from_raw_parts(self as *const _ as *const u8, size_of::<Ext4Superblock>())
         };
-        block_device.write_offset(SUPERBLOCK_OFFSET, data);
+        block_device.write(SUPERBLOCK_OFFSET, data).await;
     }
 
-    pub fn sync_to_disk_with_csum(&mut self, block_device: Arc<dyn BlockDevice>) {
+    pub async fn sync_to_disk_with_csum(&mut self, block_device: Arc<dyn BlockDevice>) {
         let data = unsafe {
             core::slice::from_raw_parts(self as *const _ as *const u8, size_of::<Ext4Superblock>())
         };
@@ -226,7 +226,7 @@ impl Ext4Superblock {
         let data = unsafe {
             core::slice::from_raw_parts(self as *const _ as *const u8, size_of::<Ext4Superblock>())
         };
-        block_device.write_offset(SUPERBLOCK_OFFSET, data);
+        block_device.write(SUPERBLOCK_OFFSET, data).await;
     }
 }
 

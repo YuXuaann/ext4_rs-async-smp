@@ -1,8 +1,13 @@
 use crate::prelude::*;
 
+use alloc::boxed::Box;
+
+use async_trait::async_trait;
+
+#[async_trait]
 pub trait BlockDevice: Send + Sync + Any {
-    fn read_offset(&self, offset: usize) -> Vec<u8>;
-    fn write_offset(&self, offset: usize, data: &[u8]);
+    async fn read(&self, id: usize) -> Vec<u8>;
+    async fn write(&self, id: usize, buf: &[u8]);
 }
 
 pub struct Block {
@@ -12,8 +17,8 @@ pub struct Block {
 
 impl Block {
     /// Load the block from the disk.
-    pub fn load(block_device: Arc<dyn BlockDevice>, offset: usize) -> Self {
-        let data = block_device.read_offset(offset);
+    pub async fn load(block_device: Arc<dyn BlockDevice>, offset: usize) -> Self {
+        let data = block_device.read(offset).await;
         Block {
             disk_offset: offset,
             data,
@@ -22,11 +27,9 @@ impl Block {
 
     /// Load the block from inode block
     pub fn load_inode_root_block(data: &[u32; 15]) -> Self {
-        let data_bytes: &[u8; 60] = unsafe {
-            core::mem::transmute(data)
-        };
+        let data_bytes: &[u8; 60] = unsafe { core::mem::transmute(data) };
         Block {
-            disk_offset: 0, 
+            disk_offset: 0,
             data: data_bytes.to_vec(),
         }
     }
@@ -75,9 +78,8 @@ impl Block {
     }
 }
 
-
-impl Block{
-    pub fn sync_blk_to_disk(&self, block_device: Arc<dyn BlockDevice>){
-        block_device.write_offset(self.disk_offset, &self.data);
+impl Block {
+    pub async fn sync_blk_to_disk(&self, block_device: Arc<dyn BlockDevice>) {
+        block_device.write(self.disk_offset, &self.data).await;
     }
 }

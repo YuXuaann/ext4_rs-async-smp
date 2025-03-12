@@ -13,14 +13,14 @@ impl Ext4 {
     ///
     /// Returns:
     /// `Result<usize>` - status of the search
-    pub fn dir_find_entry(
+    pub async fn dir_find_entry(
         &self,
         parent_inode: u32,
         name: &str,
         result: &mut Ext4DirSearchResult,
     ) -> Result<usize> {
         // load parent inode
-        let parent = self.get_inode_ref(parent_inode);
+        let parent = self.get_inode_ref(parent_inode).await;
         assert!(parent.inode.is_dir());
 
         // start from the first logical block
@@ -34,7 +34,7 @@ impl Ext4 {
 
         // iterate all blocks
         while iblock < total_blocks {
-            let search_path = self.find_extent(&parent, iblock as u32);
+            let search_path = self.find_extent(&parent, iblock as u32).await;
 
             if let Ok(path) = search_path {
                 // get the last path
@@ -45,7 +45,7 @@ impl Ext4 {
 
                 // load physical block
                 let mut ext4block =
-                    Block::load(self.block_device.clone(), fblock as usize * BLOCK_SIZE);
+                    Block::load(self.block_device.clone(), fblock as usize * BLOCK_SIZE).await;
 
                 // find entry in block
                 let r = self.dir_find_in_block(&ext4block, name, result);
@@ -105,11 +105,11 @@ impl Ext4 {
     ///
     /// Returns:
     /// `Vec<Ext4DirEntry>` - list of directory entries
-    pub fn dir_get_entries(&self, inode: u32) -> Vec<Ext4DirEntry> {
+    pub async fn dir_get_entries(&self, inode: u32) -> Vec<Ext4DirEntry> {
         let mut entries = Vec::new();
 
         // load inode
-        let inode_ref = self.get_inode_ref(inode);
+        let inode_ref = self.get_inode_ref(inode).await;
         assert!(inode_ref.inode.is_dir());
 
         // calculate total blocks
@@ -122,7 +122,7 @@ impl Ext4 {
         // iterate all blocks
         while iblock < total_blocks {
             // get physical block id of a logical block id
-            let search_path = self.find_extent(&inode_ref, iblock as u32);
+            let search_path = self.find_extent(&inode_ref, iblock as u32).await;
 
             if let Ok(path) = search_path {
                 // get the last path
@@ -133,7 +133,7 @@ impl Ext4 {
 
                 // load physical block
                 let ext4block =
-                    Block::load(self.block_device.clone(), fblock as usize * BLOCK_SIZE);
+                    Block::load(self.block_device.clone(), fblock as usize * BLOCK_SIZE).await;
                 let mut offset = 0;
 
                 // iterate all entries in a block
@@ -172,7 +172,7 @@ impl Ext4 {
     ///
     /// Returns:
     /// `Result<usize>` - status of the operation
-    pub fn dir_add_entry(
+    pub async fn dir_add_entry(
         &self,
         parent: &mut Ext4InodeRef,
         child: &Ext4InodeRef,
@@ -187,18 +187,20 @@ impl Ext4 {
         let mut iblock = 0;
         while iblock < total_blocks {
             // get physical block id of a logical block id
-            let pblock = self.get_pblock_idx(parent, iblock as u32)?;
+            let pblock = self.get_pblock_idx(parent, iblock as u32).await?;
 
             // load physical block
             let mut ext4block =
-                Block::load(self.block_device.clone(), pblock as usize * BLOCK_SIZE);
+                Block::load(self.block_device.clone(), pblock as usize * BLOCK_SIZE).await;
 
-            let result = self.try_insert_to_existing_block(&mut ext4block, name, child.inode_num);
+            let result = self
+                .try_insert_to_existing_block(&mut ext4block, name, child.inode_num)
+                .await;
 
             if result.is_ok() {
                 // set checksum
                 self.dir_set_csum(&mut ext4block, parent.inode.generation());
-                ext4block.sync_blk_to_disk(self.block_device.clone());
+                ext4block.sync_blk_to_disk(self.block_device.clone()).await;
 
                 return Ok(EOK);
             }
@@ -208,11 +210,11 @@ impl Ext4 {
         }
 
         // no space in existing blocks, need to add new block
-        let new_block = self.append_inode_pblk(parent)?;
+        let new_block = self.append_inode_pblk(parent).await?;
 
         // load new block
         let mut new_ext4block =
-            Block::load(self.block_device.clone(), new_block as usize * BLOCK_SIZE);
+            Block::load(self.block_device.clone(), new_block as usize * BLOCK_SIZE).await;
 
         // write new entry to the new block
         // must succeed, as we just allocated the block
@@ -221,7 +223,9 @@ impl Ext4 {
 
         // set checksum
         self.dir_set_csum(&mut new_ext4block, parent.inode.generation());
-        new_ext4block.sync_blk_to_disk(self.block_device.clone());
+        new_ext4block
+            .sync_blk_to_disk(self.block_device.clone())
+            .await;
 
         Ok(EOK)
     }
@@ -235,7 +239,7 @@ impl Ext4 {
     ///
     /// Returns:
     /// `Result<usize>` - status of the operation
-    pub fn try_insert_to_existing_block(
+    pub async fn try_insert_to_existing_block(
         &self,
         block: &mut Block,
         name: &str,
@@ -287,7 +291,7 @@ impl Ext4 {
                 new_entry.copy_to_slice(&mut block.data, offset + sz);
 
                 // Sync to disk
-                block.sync_blk_to_disk(self.block_device.clone());
+                block.sync_blk_to_disk(self.block_device.clone()).await;
 
                 return Ok(EOK);
             }
@@ -325,13 +329,16 @@ impl Ext4 {
         tail.copy_to_slice(&mut block.data);
     }
 
-    pub fn dir_remove_entry(&self, parent: &mut Ext4InodeRef, path: &str) -> Result<usize> {
+    pub async fn dir_remove_entry(&self, parent: &mut Ext4InodeRef, path: &str) -> Result<usize> {
         // get remove_entry pos in parent and its prev entry
         let mut result = Ext4DirSearchResult::new(Ext4DirEntry::default());
 
-        let r = self.dir_find_entry(parent.inode_num, path, &mut result)?;
+        let r = self
+            .dir_find_entry(parent.inode_num, path, &mut result)
+            .await?;
 
-        let mut ext4block = Block::load(self.block_device.clone(), result.pblock_id * BLOCK_SIZE);
+        let mut ext4block =
+            Block::load(self.block_device.clone(), result.pblock_id * BLOCK_SIZE).await;
 
         let de_del_entry_len = result.dentry.entry_len();
 
@@ -345,14 +352,14 @@ impl Ext4 {
         de_del.inode = 0;
 
         self.dir_set_csum(&mut ext4block, parent.inode.generation());
-        ext4block.sync_blk_to_disk(self.block_device.clone());
+        ext4block.sync_blk_to_disk(self.block_device.clone()).await;
 
         Ok(EOK)
     }
 
-    pub fn dir_has_entry(&self, dir_inode: u32) -> bool {
+    pub async fn dir_has_entry(&self, dir_inode: u32) -> bool {
         // load parent inode
-        let parent = self.get_inode_ref(dir_inode);
+        let parent = self.get_inode_ref(dir_inode).await;
         assert!(parent.inode.is_dir());
 
         // start from the first logical block
@@ -366,7 +373,7 @@ impl Ext4 {
 
         // iterate all blocks
         while iblock < total_blocks {
-            let search_path = self.find_extent(&parent, iblock as u32);
+            let search_path = self.find_extent(&parent, iblock as u32).await;
 
             if let Ok(path) = search_path {
                 // get the last path
@@ -377,7 +384,7 @@ impl Ext4 {
 
                 // load physical block
                 let ext4block =
-                    Block::load(self.block_device.clone(), fblock as usize * BLOCK_SIZE);
+                    Block::load(self.block_device.clone(), fblock as usize * BLOCK_SIZE).await;
 
                 // start from the first entry
                 let mut offset = 0;
@@ -401,23 +408,26 @@ impl Ext4 {
         false
     }
 
-    pub fn dir_remove(&self, parent: u32, path: &str) -> Result<usize> {
+    pub async fn dir_remove(&self, parent: u32, path: &str) -> Result<usize> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
 
-        let r = self.dir_find_entry(parent, path, &mut search_result)?;
+        let r = self
+            .dir_find_entry(parent, path, &mut search_result)
+            .await?;
 
-        let mut parent_inode_ref = self.get_inode_ref(parent);
-        let mut child_inode_ref = self.get_inode_ref(search_result.dentry.inode);
+        let mut parent_inode_ref = self.get_inode_ref(parent).await;
+        let mut child_inode_ref = self.get_inode_ref(search_result.dentry.inode).await;
 
-        if self.dir_has_entry(child_inode_ref.inode_num){
+        if self.dir_has_entry(child_inode_ref.inode_num).await {
             return_errno_with_message!(Errno::ENOTSUP, "rm dir with children not supported")
         }
-        
-        self.truncate_inode(&mut child_inode_ref, 0)?;
 
-        self.unlink(&mut parent_inode_ref, &mut child_inode_ref, path)?;
+        self.truncate_inode(&mut child_inode_ref, 0).await?;
 
-        self.write_back_inode(&mut parent_inode_ref);
+        self.unlink(&mut parent_inode_ref, &mut child_inode_ref, path)
+            .await?;
+
+        self.write_back_inode(&mut parent_inode_ref).await;
 
         // to do
         // ext4_inode_set_del_time

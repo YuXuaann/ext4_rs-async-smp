@@ -6,36 +6,37 @@ use crate::return_errno_with_message;
 use crate::utils::path_check;
 
 // export some definitions
-pub use crate::ext4_defs::Ext4;
-pub use crate::ext4_defs::BLOCK_SIZE;
 pub use crate::ext4_defs::BlockDevice;
+pub use crate::ext4_defs::Ext4;
 pub use crate::ext4_defs::InodeFileType;
+pub use crate::ext4_defs::BLOCK_SIZE;
 
 /// fuser interface for ext4
 impl Ext4 {
     /// Look up a directory entry by name and get its attributes.
-    pub fn fuse_lookup(&self, parent: u64, name: &str) -> Result<FileAttr> {
+    pub async fn fuse_lookup(&self, parent: u64, name: &str) -> Result<FileAttr> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
 
-        self.dir_find_entry(parent as u32, name, &mut search_result)?;
+        self.dir_find_entry(parent as u32, name, &mut search_result)
+            .await?;
 
         let inode_num = search_result.dentry.inode;
 
-        let inode_ref = self.get_inode_ref(inode_num);
+        let inode_ref = self.get_inode_ref(inode_num).await;
         let file_attr = FileAttr::from_inode_ref(&inode_ref);
 
         Ok(file_attr)
     }
 
     /// Get file attributes.
-    pub fn fuse_getattr(&self, ino: u64) -> Result<FileAttr> {
-        let inode_ref = self.get_inode_ref(ino as u32);
+    pub async fn fuse_getattr(&self, ino: u64) -> Result<FileAttr> {
+        let inode_ref = self.get_inode_ref(ino as u32).await;
         let file_attr = FileAttr::from_inode_ref(&inode_ref);
         Ok(file_attr)
     }
 
     /// Set file attributes.
-    pub fn fuse_setattr(
+    pub async fn fuse_setattr(
         &self,
         ino: u64,
         mode: Option<u32>,
@@ -51,7 +52,7 @@ impl Ext4 {
         bkuptime: Option<u32>,
         flags: Option<u32>,
     ) {
-        let mut inode_ref = self.get_inode_ref(ino as u32);
+        let mut inode_ref = self.get_inode_ref(ino as u32).await;
 
         let mut attr = FileAttr::default();
 
@@ -105,21 +106,20 @@ impl Ext4 {
 
         inode_ref.set_attr(&attr);
 
-        self.write_back_inode(&mut inode_ref);
+        self.write_back_inode(&mut inode_ref).await;
     }
 
     /// Read symbolic link.
-    fn fuse_readlink(&mut self, ino: u64) -> Result<Vec<u8>> {
-        let inode_ref = self.get_inode_ref(ino as u32);
+    async fn fuse_readlink(&mut self, ino: u64) -> Result<Vec<u8>> {
+        let inode_ref = self.get_inode_ref(ino as u32).await;
         let file_size = inode_ref.inode.size();
         let mut read_buf = vec![0; file_size as usize];
-        let read_size = self.read_at(ino as u32, 0, &mut read_buf)?;
+        let read_size = self.read_at(ino as u32, 0, &mut read_buf).await?;
         Ok(read_buf)
     }
 
-
     /// Create a regular file, character device, block device, fifo or socket node.
-    pub fn fuse_mknod(
+    pub async fn fuse_mknod(
         &self,
         parent: u64,
         name: &str,
@@ -128,39 +128,52 @@ impl Ext4 {
         rdev: u32,
     ) -> Result<Ext4InodeRef> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
-        let r = self.dir_find_entry(parent as u32, name, &mut search_result);
+        let r = self
+            .dir_find_entry(parent as u32, name, &mut search_result)
+            .await;
         if r.is_ok() {
             return_errno!(Errno::EEXIST);
         }
-        let inode_ref = self.create(parent as u32, name, mode as u16)?;
+        let inode_ref = self.create(parent as u32, name, mode as u16).await?;
         Ok(inode_ref)
     }
 
-
     /// Create a regular file, character device, block device, fifo or socket node.
-    pub fn fuse_mknod_with_attr(
+    pub async fn fuse_mknod_with_attr(
         &self,
         parent: u64,
         name: &str,
         mode: u32,
         umask: u32,
         rdev: u32,
-        uid: u32, 
+        uid: u32,
         gid: u32,
     ) -> Result<Ext4InodeRef> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
-        let r = self.dir_find_entry(parent as u32, name, &mut search_result);
+        let r = self
+            .dir_find_entry(parent as u32, name, &mut search_result)
+            .await;
         if r.is_ok() {
             return_errno!(Errno::EEXIST);
         }
-        let inode_ref = self.create_with_attr(parent as u32, name, mode as u16, uid as u16, gid as u16)?;
+        let inode_ref = self
+            .create_with_attr(parent as u32, name, mode as u16, uid as u16, gid as u16)
+            .await?;
         Ok(inode_ref)
     }
 
     /// Create a directory.
-    pub fn fuse_mkdir(&mut self, parent: u64, name: &str, mode: u32, umask: u32) -> Result<usize> {
+    pub async fn fuse_mkdir(
+        &mut self,
+        parent: u64,
+        name: &str,
+        mode: u32,
+        umask: u32,
+    ) -> Result<usize> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
-        let r = self.dir_find_entry(parent as u32, name, &mut search_result);
+        let r = self
+            .dir_find_entry(parent as u32, name, &mut search_result)
+            .await;
         if r.is_ok() {
             return_errno!(Errno::EEXIST);
         }
@@ -169,15 +182,24 @@ impl Ext4 {
             // The mode is not a directory
             return_errno_with_message!(Errno::EINVAL, "Invalid mode for directory creation");
         }
-        let inode_ref = self.create(parent as u32, name, mode as u16)?;
+        let inode_ref = self.create(parent as u32, name, mode as u16).await?;
         Ok(EOK)
     }
 
     /// Create a directory.
-    pub fn fuse_mkdir_with_attr(&mut self, parent: u64, name: &str, mode: u32, umask: u32, uid:u32, gid:u32) -> Result<Ext4InodeRef> {
-
+    pub async fn fuse_mkdir_with_attr(
+        &mut self,
+        parent: u64,
+        name: &str,
+        mode: u32,
+        umask: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Result<Ext4InodeRef> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
-        let r = self.dir_find_entry(parent as u32, name, &mut search_result);
+        let r = self
+            .dir_find_entry(parent as u32, name, &mut search_result)
+            .await;
         if r.is_ok() {
             return_errno!(Errno::EEXIST);
         }
@@ -188,24 +210,28 @@ impl Ext4 {
             None => InodeFileType::S_IFDIR,
         };
         let mode = file_type.bits();
-        let inode_ref = self.create_with_attr(parent as u32, name, mode, uid as u16, gid as u16)?;
+        let inode_ref = self
+            .create_with_attr(parent as u32, name, mode, uid as u16, gid as u16)
+            .await?;
 
         Ok(inode_ref)
     }
 
     /// Remove a file.
-    pub fn fuse_unlink(&self, parent: u64, name: &str) -> Result<usize> {
+    pub async fn fuse_unlink(&self, parent: u64, name: &str) -> Result<usize> {
         // unlink actual remove a file
 
         // get child inode num
         let mut parent_inode = parent as u32;
         let mut nameoff = 0;
-        let child_inode = self.generic_open(name, &mut parent_inode, false, 0, &mut nameoff)?;
+        let child_inode = self
+            .generic_open(name, &mut parent_inode, false, 0, &mut nameoff)
+            .await?;
 
-        let mut child_inode_ref = self.get_inode_ref(child_inode);
+        let mut child_inode_ref = self.get_inode_ref(child_inode).await;
         let child_link_cnt = child_inode_ref.inode.links_count();
         if child_link_cnt == 1 {
-            self.truncate_inode(&mut child_inode_ref, 0)?;
+            self.truncate_inode(&mut child_inode_ref, 0).await?;
         }
 
         // get child name
@@ -214,30 +240,31 @@ impl Ext4 {
         let len = path_check(p, &mut is_goal);
 
         // load parent
-        let mut parent_inode_ref = self.get_inode_ref(parent_inode);
+        let mut parent_inode_ref = self.get_inode_ref(parent_inode).await;
 
-        let r = self.unlink(
-            &mut parent_inode_ref,
-            &mut child_inode_ref,
-            &p[..len],
-        )?;
+        let r = self
+            .unlink(&mut parent_inode_ref, &mut child_inode_ref, &p[..len])
+            .await?;
 
         Ok(EOK)
     }
     /// Remove a directory.
-    pub fn fuse_rmdir(&mut self, parent: u64, name: &str) -> Result<usize> {
+    pub async fn fuse_rmdir(&mut self, parent: u64, name: &str) -> Result<usize> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
 
-        let r = self.dir_find_entry(parent as u32, name, &mut search_result)?;
+        let r = self
+            .dir_find_entry(parent as u32, name, &mut search_result)
+            .await?;
 
-        let mut parent_inode_ref = self.get_inode_ref(parent as u32);
-        let mut child_inode_ref = self.get_inode_ref(search_result.dentry.inode);
+        let mut parent_inode_ref = self.get_inode_ref(parent as u32).await;
+        let mut child_inode_ref = self.get_inode_ref(search_result.dentry.inode).await;
 
-        self.truncate_inode(&mut child_inode_ref, 0)?;
+        self.truncate_inode(&mut child_inode_ref, 0).await?;
 
-        self.unlink(&mut parent_inode_ref, &mut child_inode_ref, name)?;
+        self.unlink(&mut parent_inode_ref, &mut child_inode_ref, name)
+            .await?;
 
-        self.write_back_inode(&mut parent_inode_ref);
+        self.write_back_inode(&mut parent_inode_ref).await;
 
         // to do
         // ext4_inode_set_del_time
@@ -247,9 +274,16 @@ impl Ext4 {
         Ok(EOK)
     }
     /// Create a symbolic link.
-    pub fn fuse_symlink(&mut self, parent: u64, link_name: &str, target: &str) -> Result<usize> {
+    pub async fn fuse_symlink(
+        &mut self,
+        parent: u64,
+        link_name: &str,
+        target: &str,
+    ) -> Result<usize> {
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
-        let r = self.dir_find_entry(parent as u32, link_name, &mut search_result);
+        let r = self
+            .dir_find_entry(parent as u32, link_name, &mut search_result)
+            .await;
         if r.is_ok() {
             return_errno!(Errno::EEXIST);
         }
@@ -258,7 +292,7 @@ impl Ext4 {
         let file_type = InodeFileType::S_IFLNK;
         mode |= file_type.bits();
 
-        let inode_ref = self.create(parent as u32, link_name, mode)?;
+        let inode_ref = self.create(parent as u32, link_name, mode).await?;
         Ok(EOK)
     }
     /// Create a hard link.
@@ -268,12 +302,13 @@ impl Ext4 {
     /// newname: the name of the new file
     ///
     ///
-    pub fn fuse_link(&mut self, ino: u64, newparent: u64, newname: &str) -> Result<usize> {
-        let mut parent_inode_ref = self.get_inode_ref(newparent as u32);
-        let mut child_inode_ref = self.get_inode_ref(ino as u32);
+    pub async fn fuse_link(&mut self, ino: u64, newparent: u64, newname: &str) -> Result<usize> {
+        let mut parent_inode_ref = self.get_inode_ref(newparent as u32).await;
+        let mut child_inode_ref = self.get_inode_ref(ino as u32).await;
 
         // to do if child already exists we should not add . and .. in child directory
-        self.link(&mut parent_inode_ref, &mut child_inode_ref, newname)?;
+        self.link(&mut parent_inode_ref, &mut child_inode_ref, newname)
+            .await?;
 
         Ok(EOK)
     }
@@ -286,8 +321,8 @@ impl Ext4 {
     /// anything in fh. There are also some flags (direct_io, keep_cache) which the
     /// filesystem may set, to change the way the file is opened. See fuse_file_info
     /// structure in <fuse_common.h> for more details.
-    pub fn fuse_open(&mut self, ino: u64, flags: i32) -> Result<usize> {
-        let inode_ref = self.get_inode_ref(ino as u32);
+    pub async fn fuse_open(&mut self, ino: u64, flags: i32) -> Result<usize> {
+        let inode_ref = self.get_inode_ref(ino as u32).await;
 
         // check permission
         let file_type = inode_ref.inode.file_type();
@@ -324,7 +359,7 @@ impl Ext4 {
     ///
     /// flags: these are the file flags, such as O_SYNC. Only supported with ABI >= 7.9
     /// lock_owner: only supported with ABI >= 7.9
-    pub fn fuse_read(
+    pub async fn fuse_read(
         &self,
         ino: u64,
         fh: u64,
@@ -332,9 +367,9 @@ impl Ext4 {
         size: u32,
         flags: i32,
         lock_owner: Option<u64>,
-        ) -> Result<Vec<u8>> {
+    ) -> Result<Vec<u8>> {
         let mut data = vec![0u8; size as usize];
-        let read_size = self.read_at(ino as u32, offset as usize, &mut data)?;
+        let read_size = self.read_at(ino as u32, offset as usize, &mut data).await?;
         let r = data[..read_size].to_vec();
         Ok(r)
     }
@@ -351,7 +386,7 @@ impl Ext4 {
     /// is disabled
     /// flags: these are the file flags, such as O_SYNC. Only supported with ABI >= 7.9
     /// lock_owner: only supported with ABI >= 7.9
-    pub fn fuse_write(
+    pub async fn fuse_write(
         &self,
         ino: u64,
         fh: u64,
@@ -361,7 +396,7 @@ impl Ext4 {
         flags: i32,
         lock_owner: Option<u64>,
     ) -> Result<usize> {
-        let write_size = self.write_at(ino as u32, offset as usize, data)?;
+        let write_size = self.write_at(ino as u32, offset as usize, data).await?;
         Ok(write_size)
     }
 
@@ -372,8 +407,8 @@ impl Ext4 {
     /// anything in fh, though that makes it impossible to implement standard conforming
     /// directory stream operations in case the contents of the directory can change
     /// between opendir and releasedir.
-    pub fn fuse_opendir(&mut self, ino: u64, flags: i32) -> Result<usize> {
-        let inode_ref = self.get_inode_ref(ino as u32);
+    pub async fn fuse_opendir(&mut self, ino: u64, flags: i32) -> Result<usize> {
+        let inode_ref = self.get_inode_ref(ino as u32).await;
 
         // 检查是否为目录
         if !inode_ref.inode.is_dir() {
@@ -395,8 +430,8 @@ impl Ext4 {
     /// requested size. Send an empty buffer on end of stream. fh will contain the
     /// value set by the opendir method, or will be undefined if the opendir method
     /// didn't set any value.
-    pub fn fuse_readdir(&self, ino: u64, fh: u64, offset: i64) -> Result<Vec<Ext4DirEntry>> {
-        let mut entries = self.dir_get_entries(ino as u32);
+    pub async fn fuse_readdir(&self, ino: u64, fh: u64, offset: i64) -> Result<Vec<Ext4DirEntry>> {
+        let mut entries = self.dir_get_entries(ino as u32).await;
         entries = entries[offset as usize..].to_vec();
         Ok(entries)
     }
@@ -411,7 +446,7 @@ impl Ext4 {
     /// structure in <fuse_common.h> for more details. If this method is not
     /// implemented or under Linux kernel versions earlier than 2.6.15, the mknod()
     /// and open() methods will be called instead.
-    pub fn fuse_create(
+    pub async fn fuse_create(
         &mut self,
         parent: u64,
         name: &str,
@@ -421,9 +456,11 @@ impl Ext4 {
     ) -> Result<usize> {
         // check file exist
         let mut search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
-        let r = self.dir_find_entry(parent as u32, name, &mut search_result);
+        let r = self
+            .dir_find_entry(parent as u32, name, &mut search_result)
+            .await;
         if r.is_ok() {
-            let inode_ref = self.get_inode_ref(search_result.dentry.inode);
+            let inode_ref = self.get_inode_ref(search_result.dentry.inode).await;
 
             // check permission
             let file_perm = inode_ref.inode.file_perm();
@@ -438,7 +475,7 @@ impl Ext4 {
             }
 
             // If trying to open the file in read mode, check for read permissions
-            if (flags & O_RDONLY != 0) || (flags & O_RDWR != 0) && !can_read{
+            if (flags & O_RDONLY != 0) || (flags & O_RDWR != 0) && !can_read {
                 return_errno_with_message!(Errno::EACCES, "Permission denied can not read");
             }
 
@@ -450,7 +487,7 @@ impl Ext4 {
             return Ok(EOK);
         } else {
             //create file
-            let inode_ref = self.create(parent as u32, name, mode as u16)?;
+            let inode_ref = self.create(parent as u32, name, mode as u16).await?;
         }
 
         Ok(EOK)
@@ -462,10 +499,17 @@ impl Ext4 {
     /// under Linux kernel versions 2.4.x
     /// int access(const char *pathname, int mode);
     /// int faccessat(int dirfd, const char *pathname, int mode, int flags);
-    /// 
+    ///
     /// uid and gid come from request
-    pub fn fuse_access(&mut self, ino: u64, uid: u16, gid: u16, mode: u16, mask: i32) -> bool {
-        let inode_ref = self.get_inode_ref(ino as u32);
+    pub async fn fuse_access(
+        &mut self,
+        ino: u64,
+        uid: u16,
+        gid: u16,
+        mode: u16,
+        mask: i32,
+    ) -> bool {
+        let inode_ref = self.get_inode_ref(ino as u32).await;
 
         inode_ref.inode.check_access(uid, gid, mode, mask as u16)
     }
@@ -474,8 +518,8 @@ impl Ext4 {
     /// Linux stat syscall defines:
     /// int stat(const char *restrict pathname, struct stat *restrict statbuf);
     /// int fstatat(int dirfd, const char *restrict pathname, struct stat *restrict statbuf, int flags);
-    pub fn fuse_statfs(&mut self, ino: u64) -> Result<LinuxStat> {
-        let inode_ref = self.get_inode_ref(ino as u32);
+    pub async fn fuse_statfs(&mut self, ino: u64) -> Result<LinuxStat> {
+        let inode_ref = self.get_inode_ref(ino as u32).await;
         let linux_stat = LinuxStat::from_inode_ref(&inode_ref);
         Ok(linux_stat)
     }

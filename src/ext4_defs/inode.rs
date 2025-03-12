@@ -463,11 +463,11 @@ impl Ext4Inode {
         }
     }
 
-    pub fn sync_inode_to_disk(&self, block_device: Arc<dyn BlockDevice>, inode_pos: usize) {
+    pub async fn sync_inode_to_disk(&self, block_device: Arc<dyn BlockDevice>, inode_pos: usize) {
         let data = unsafe {
             core::slice::from_raw_parts(self as *const _ as *const u8, size_of::<Ext4Inode>())
         };
-        block_device.write_offset(inode_pos, data);
+        block_device.write(inode_pos, data).await;
     }
 }
 
@@ -599,7 +599,7 @@ mod tests {
 
         assert!(!inode.check_access(uid, gid, access_mode as u16, umask));
     }
-    
+
     #[test]
     fn test_file_type() {
         let inode = Ext4Inode {
@@ -631,6 +631,10 @@ mod tests {
         inode.set_file_type(InodeFileType::S_IFREG);
         assert_eq!(inode.mode, InodeFileType::S_IFREG.bits()); // Regular file with rwx permissions
         inode.set_file_perm(InodePerm::S_IREAD | InodePerm::S_IWRITE | InodePerm::S_IEXEC);
-        assert_eq!(inode.mode, InodeFileType::S_IFREG.bits() | (InodePerm::S_IREAD | InodePerm::S_IWRITE | InodePerm::S_IEXEC).bits()); // Regular file with rwx permissions
+        assert_eq!(
+            inode.mode,
+            InodeFileType::S_IFREG.bits()
+                | (InodePerm::S_IREAD | InodePerm::S_IWRITE | InodePerm::S_IEXEC).bits()
+        ); // Regular file with rwx permissions
     }
 }

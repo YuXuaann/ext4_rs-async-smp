@@ -4,7 +4,7 @@ use crate::return_errno_with_message;
 use crate::utils::bitmap::*;
 
 impl Ext4 {
-    pub fn ialloc_alloc_inode(&self, is_dir: bool) -> Result<u32> {
+    pub async fn ialloc_alloc_inode(&self, is_dir: bool) -> Result<u32> {
         let mut bgid = 0;
         let bg_count = self.super_block.block_group_count();
         let mut super_block = self.super_block;
@@ -16,7 +16,8 @@ impl Ext4 {
             }
 
             let mut bg =
-                Ext4BlockGroup::load_new(self.block_device.clone(), &super_block, bgid as usize);
+                Ext4BlockGroup::load_new(self.block_device.clone(), &super_block, bgid as usize)
+                    .await;
 
             let mut free_inodes = bg.get_free_inodes_count();
 
@@ -25,7 +26,8 @@ impl Ext4 {
 
                 let mut raw_data = self
                     .block_device
-                    .read_offset(inode_bitmap_block as usize * BLOCK_SIZE);
+                    .read(inode_bitmap_block as usize * BLOCK_SIZE)
+                    .await;
 
                 let inodes_in_bg = super_block.get_inodes_in_group_cnt(bgid);
 
@@ -38,7 +40,8 @@ impl Ext4 {
 
                 // update bitmap in disk
                 self.block_device
-                    .write_offset(inode_bitmap_block as usize * BLOCK_SIZE, bitmap_data);
+                    .write(inode_bitmap_block as usize * BLOCK_SIZE, bitmap_data)
+                    .await;
 
                 bg.set_block_group_ialloc_bitmap_csum(&super_block, bitmap_data);
 
@@ -60,11 +63,14 @@ impl Ext4 {
                     bg.set_itable_unused(&super_block, unused);
                 }
 
-                bg.sync_to_disk_with_csum(self.block_device.clone(), bgid as usize, &super_block);
+                bg.sync_to_disk_with_csum(self.block_device.clone(), bgid as usize, &super_block)
+                    .await;
 
                 /* Update superblock */
                 super_block.decrease_free_inodes_count();
-                super_block.sync_to_disk_with_csum(self.block_device.clone());
+                super_block
+                    .sync_to_disk_with_csum(self.block_device.clone())
+                    .await;
 
                 /* Compute the absolute i-nodex number */
                 let inodes_per_group = super_block.inodes_per_group();
@@ -79,20 +85,21 @@ impl Ext4 {
         return_errno_with_message!(Errno::ENOSPC, "alloc inode fail");
     }
 
-    pub fn ialloc_free_inode(&self, index: u32, is_dir: bool) {
+    pub async fn ialloc_free_inode(&self, index: u32, is_dir: bool) {
         // Compute index of block group
         let bgid = self.get_bgid_of_inode(index);
         let block_device = self.block_device.clone();
 
         let mut super_block = self.super_block;
         let mut bg =
-            Ext4BlockGroup::load_new(self.block_device.clone(), &super_block, bgid as usize);
+            Ext4BlockGroup::load_new(self.block_device.clone(), &super_block, bgid as usize).await;
 
         // Load inode bitmap block
         let inode_bitmap_block = bg.get_inode_bitmap_block(&self.super_block);
         let mut bitmap_data = self
             .block_device
-            .read_offset(inode_bitmap_block as usize * BLOCK_SIZE);
+            .read(inode_bitmap_block as usize * BLOCK_SIZE)
+            .await;
 
         // Find index within group and clear bit
         let index_in_group = self.inode_to_bgidx(index);
@@ -101,7 +108,8 @@ impl Ext4 {
         // Set new checksum after modification
         // update bitmap in disk
         self.block_device
-            .write_offset(inode_bitmap_block as usize * BLOCK_SIZE, &bitmap_data);
+            .write(inode_bitmap_block as usize * BLOCK_SIZE, &bitmap_data)
+            .await;
         bg.set_block_group_ialloc_bitmap_csum(&super_block, &bitmap_data);
 
         // Update free inodes count in block group
@@ -114,9 +122,12 @@ impl Ext4 {
             bg.set_used_dirs_count(&self.super_block, used_dirs);
         }
 
-        bg.sync_to_disk_with_csum(block_device.clone(), bgid as usize, &super_block);
+        bg.sync_to_disk_with_csum(block_device.clone(), bgid as usize, &super_block)
+            .await;
 
         super_block.decrease_free_inodes_count();
-        super_block.sync_to_disk_with_csum(self.block_device.clone());
+        super_block
+            .sync_to_disk_with_csum(self.block_device.clone())
+            .await;
     }
 }

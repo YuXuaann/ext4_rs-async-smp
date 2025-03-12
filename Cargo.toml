@@ -11,3 +11,4 @@ repository = "https://github.com/yuoo655/ext4_rs"
 [dependencies]
 bitflags = "2.2.1"
 log = "0.4"
+async-trait = "0.1.50"

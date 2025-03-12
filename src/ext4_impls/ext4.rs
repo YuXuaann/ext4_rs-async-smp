@@ -5,9 +5,9 @@ use crate::utils::*;
 use crate::ext4_defs::*;
 impl Ext4 {
     /// Opens and loads an Ext4 from the `block_device`.
-    pub fn open(block_device: Arc<dyn BlockDevice>) -> Self {
+    pub async fn open(block_device: Arc<dyn BlockDevice>) -> Self {
         // Load the superblock
-        let block = Block::load(block_device.clone(), SUPERBLOCK_OFFSET);
+        let block = Block::load(block_device.clone(), SUPERBLOCK_OFFSET).await;
         let super_block: Ext4Superblock = block.read_as();
 
         Ext4 {
@@ -17,7 +17,7 @@ impl Ext4 {
     }
 
     // with dir result search path offset
-    pub fn generic_open(
+    pub async fn generic_open(
         &self,
         path: &str,
         parent_inode_num: &mut u32,
@@ -32,7 +32,7 @@ impl Ext4 {
         let mut search_path = path;
 
         let mut dir_search_result = Ext4DirSearchResult::new(Ext4DirEntry::default());
-        
+
         loop {
             while search_path.starts_with('/') {
                 *name_off += 1; // Skip the slash
@@ -42,15 +42,17 @@ impl Ext4 {
             let len = path_check(search_path, &mut is_goal);
 
             let current_path = &search_path[..len];
-            
+
             if len == 0 || search_path.is_empty() {
                 break;
             }
 
             search_path = &search_path[len..];
 
-            let r = self.dir_find_entry(*parent, current_path, &mut dir_search_result);
-            
+            let r = self
+                .dir_find_entry(*parent, current_path, &mut dir_search_result)
+                .await;
+
             // log::trace!("find in parent {:x?} r {:?} name {:?}", parent, r, current_path);
             if let Err(e) = r {
                 if e.error() != Errno::ENOENT || !create {
@@ -64,21 +66,20 @@ impl Ext4 {
                     inode_mode = InodeFileType::S_IFDIR.bits();
                 }
 
-                let new_inode_ref = self.create(*parent, current_path, inode_mode)?;
+                let new_inode_ref = self.create(*parent, current_path, inode_mode).await?;
 
                 // Update parent to the new inode
                 *parent = new_inode_ref.inode_num;
 
                 // Now, update dir_search_result to reflect the new inode
                 dir_search_result.dentry.inode = new_inode_ref.inode_num;
-                
+
                 continue;
             }
 
-
             if is_goal {
                 break;
-            }else{
+            } else {
                 // update parent
                 *parent = dir_search_result.dentry.inode;
             }
@@ -93,31 +94,33 @@ impl Ext4 {
     }
 
     #[allow(unused)]
-    pub fn dir_mk(&self, path: &str) -> Result<usize> {
+    pub async fn dir_mk(&self, path: &str) -> Result<usize> {
         let mut nameoff = 0;
 
         let filetype = InodeFileType::S_IFDIR;
-        
+
         // todo get this path's parent
-        
+
         // start from root
         let mut parent = ROOT_INODE;
 
-        let r = self.generic_open(path, &mut parent, true, filetype.bits(), &mut nameoff);
+        let r = self
+            .generic_open(path, &mut parent, true, filetype.bits(), &mut nameoff)
+            .await;
         Ok(EOK)
     }
 
-    pub fn unlink(
+    pub async fn unlink(
         &self,
         parent: &mut Ext4InodeRef,
         child: &mut Ext4InodeRef,
         name: &str,
     ) -> Result<usize> {
-        self.dir_remove_entry(parent, name)?;
+        self.dir_remove_entry(parent, name).await?;
 
         let is_dir = child.inode.is_dir();
 
-        self.ialloc_free_inode(child.inode_num, is_dir);
+        self.ialloc_free_inode(child.inode_num, is_dir).await;
 
         Ok(EOK)
     }

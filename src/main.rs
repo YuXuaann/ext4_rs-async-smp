@@ -109,16 +109,14 @@ fn main() {
     let path = "test_files/0.txt";
     // 1G
     const READ_SIZE: usize = (0x100000 * 1024);
-    let mut read_buf = vec![0u8;  READ_SIZE as usize];
+    let mut read_buf = vec![0u8; READ_SIZE as usize];
     let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
     let mut data = vec![0u8; READ_SIZE as usize];
     let read_data = ext4.read_at(child_inode, 0 as usize, &mut data);
     log::info!("read data  {:?}", &data[..10]);
 
-
-
     let path = "test_files/linktest";
-    let mut read_buf = vec![0u8;  READ_SIZE as usize];
+    let mut read_buf = vec![0u8; READ_SIZE as usize];
     // 2 is root inode
     let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
     let mut data = vec![0u8; READ_SIZE as usize];
@@ -158,7 +156,9 @@ fn main() {
     log::info!("----create file----");
     let inode_mode = InodeFileType::S_IFREG.bits();
     let inode_perm = (InodePerm::S_IREAD | InodePerm::S_IWRITE).bits();
-    let inode_ref = ext4.create(ROOT_INODE, "4G.txt", inode_mode | inode_perm).unwrap();
+    let inode_ref = ext4
+        .create(ROOT_INODE, "4G.txt", inode_mode | inode_perm)
+        .unwrap();
     log::info!("----write file----");
     const WRITE_SIZE: usize = (0x100000 * (4096));
     let write_buf = vec![0x41 as u8; WRITE_SIZE];
@@ -166,10 +166,9 @@ fn main() {
 
     // check
     let path = "4G.txt";
-    let mut read_buf = vec![0u8;  WRITE_SIZE as usize];
+    let mut read_buf = vec![0u8; WRITE_SIZE as usize];
     let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
     let mut data = vec![0u8; WRITE_SIZE as usize];
     let read_data = ext4.read_at(child_inode, 0 as usize, &mut data);
     log::info!("read data  {:?}", &data[..10]);
-
 }
