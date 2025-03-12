@@ -139,4 +139,12 @@ impl Ext4 {
         let write_size = self.write_at(ino as u32, offset as usize, data).await?;
         Ok(write_size)
     }
+
+    /// Get the size of a file.
+    pub async fn get_size(&self, ino: u32) -> u64 {
+        // get the inode reference
+        let mut inode_ref = self.get_inode_ref(ino).await;
+        // Get the file size
+        inode_ref.inode.size()
+    }
 }
