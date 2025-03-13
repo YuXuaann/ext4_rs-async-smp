@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-pub const BLOCK_SIZE: usize = 512;
+pub const BLOCK_SIZE: usize = 4096;
 
 pub type Ext4Lblk = u32;
 pub type Ext4Fsblk = u64;
