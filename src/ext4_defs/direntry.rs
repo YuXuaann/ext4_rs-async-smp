@@ -251,7 +251,9 @@ impl Ext4DirEntryTail{
         blk_data: &[u8],
         ino_gen: u32,
     ) {
+        trace!("here 1");
         let csum = diren.ext4_dir_get_csum(s, blk_data, ino_gen);
+        trace!("here 1");
         self.checksum = csum;
     }
 
