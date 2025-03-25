@@ -28,7 +28,6 @@ pub struct Ext4DirEntry {
     pub name: [u8; 255],          // 文件名
 }
 
-
 /// Internal directory entry structure.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -36,7 +35,6 @@ pub union Ext4DirEnInternal {
     pub name_length_high: u8, // 高8位的文件名长度
     pub inode_type: u8,       // 引用的inode的类型（在rev >= 0.5中）
 }
-
 
 /// Fake directory entry structure. Used for directory entry iteration.
 #[repr(C)]
@@ -57,13 +55,12 @@ pub struct Ext4DirEntryTail {
     pub checksum: u32, // crc32c(uuid+inum+dirblock)
 }
 
-pub struct Ext4DirSearchResult{
-    pub dentry: Ext4DirEntry, 
-    pub pblock_id: usize, // disk block id
-    pub offset: usize, // offset in block
+pub struct Ext4DirSearchResult {
+    pub dentry: Ext4DirEntry,
+    pub pblock_id: usize,   // disk block id
+    pub offset: usize,      // offset in block
     pub prev_offset: usize, //prev direntry offset
 }
-
 
 impl Ext4DirSearchResult {
     pub fn new(dentry: Ext4DirEntry) -> Self {
@@ -75,7 +72,6 @@ impl Ext4DirSearchResult {
         }
     }
 }
-
 
 impl Debug for Ext4DirEnInternal {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -119,7 +115,6 @@ impl<T> TryFrom<&[T]> for Ext4DirEntry {
 
 /// Directory entry implementation.
 impl Ext4DirEntry {
-
     /// Check if the directory entry is unused.
     pub fn unused(&self) -> bool {
         self.inode == 0
@@ -132,8 +127,8 @@ impl Ext4DirEntry {
 
     /// Check name
     pub fn compare_name(&self, name: &str) -> bool {
-        if self.name_len as usize == name.len(){
-            return &self.name[..name.len()] == name.as_bytes()
+        if self.name_len as usize == name.len() {
+            return &self.name[..name.len()] == name.as_bytes();
         }
         false
     }
@@ -166,7 +161,6 @@ impl Ext4DirEntry {
         size_of::<Ext4FakeDirEntry>() + self.name_len as usize
     }
 
-
     /// 计算对齐后的目录项长度（包括填充字节）
     pub fn used_len_aligned(&self) -> usize {
         let mut len = self.actual_len();
@@ -176,19 +170,16 @@ impl Ext4DirEntry {
         len
     }
 
-    
-    pub fn write_entry(&mut self, entry_len: u16, inode: u32, name: &str, de_type:DirEntryType) {
+    pub fn write_entry(&mut self, entry_len: u16, inode: u32, name: &str, de_type: DirEntryType) {
         self.inode = inode;
         self.entry_len = entry_len;
         self.name_len = name.len() as u8;
         self.inner.inode_type = de_type.bits();
         self.name[..name.len()].copy_from_slice(name.as_bytes());
     }
-
 }
 
 impl Ext4DirEntry {
-
     /// Get the checksum of the directory entry.
     #[allow(unused)]
     pub fn ext4_dir_get_csum(&self, s: &Ext4Superblock, blk_data: &[u8], ino_gen: u32) -> u32 {
@@ -201,12 +192,10 @@ impl Ext4DirEntry {
         csum = ext4_crc32c(EXT4_CRC32_INIT, &uuid, uuid.len() as u32);
         csum = ext4_crc32c(csum, &ino_index.to_le_bytes(), 4);
         csum = ext4_crc32c(csum, &ino_gen.to_le_bytes(), 4);
-        let mut data = [0u8; 0xff4];
-        unsafe {
-            core::ptr::copy_nonoverlapping(blk_data.as_ptr(), data.as_mut_ptr(), blk_data.len());
-        }
-
-        csum = ext4_crc32c(csum, &data[..], 0xff4);
+        // 直接使用blk_data进行校验和计算，避免额外的内存分配
+        // 如果这个assert报错了，就回退
+        assert!(blk_data.len() >= 0xff4);
+        csum = ext4_crc32c(csum, blk_data, 0xff4.min(blk_data.len() as u32));
         csum
     }
 
@@ -232,8 +221,7 @@ impl Ext4DirEntry {
     }
 }
 
-
-impl Ext4DirEntryTail{
+impl Ext4DirEntryTail {
     pub fn new() -> Self {
         Self {
             reserved_zero1: 0,
@@ -251,18 +239,18 @@ impl Ext4DirEntryTail{
         blk_data: &[u8],
         ino_gen: u32,
     ) {
-        trace!("here 1");
+        // trace!("here 1");
         let csum = diren.ext4_dir_get_csum(s, blk_data, ino_gen);
-        trace!("here 1");
+        // trace!("here 1");
         self.checksum = csum;
     }
 
     pub fn copy_to_slice(&self, array: &mut [u8]) {
         unsafe {
-        let offset = BLOCK_SIZE - core::mem::size_of::<Ext4DirEntryTail>();
-        let de_ptr = self as *const Ext4DirEntryTail as *const u8;
-        let array_ptr = array as *mut [u8] as *mut u8;
-        let count = core::mem::size_of::<Ext4DirEntryTail>();
+            let offset = BLOCK_SIZE - core::mem::size_of::<Ext4DirEntryTail>();
+            let de_ptr = self as *const Ext4DirEntryTail as *const u8;
+            let array_ptr = array as *mut [u8] as *mut u8;
+            let count = core::mem::size_of::<Ext4DirEntryTail>();
             core::ptr::copy_nonoverlapping(de_ptr, array_ptr.add(offset), count);
         }
     }
