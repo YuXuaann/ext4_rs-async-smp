@@ -309,67 +309,24 @@ impl Ext4 {
         }
 
         // Aligned write
-        let mut fblock_start = 0;
-        let mut fblock_count = 0;
-
         while written < write_buf_len {
-            while iblk_idx < iblock_last && written < write_buf_len {
-                // Get the physical block id, if the block is not present, append a new block
-                let pblock_idx = if iblk_idx < ifile_blocks as usize {
-                    self.get_pblock_idx(&inode_ref, iblk_idx as u32).await?
-                } else {
-                    // physical block not exist, append a new block
-                    self.append_inode_pblk_from(&mut inode_ref, &mut start_bgid)
-                        .await?
-                };
-                if fblock_start == 0 {
-                    fblock_start = pblock_idx;
-                }
-
-                // Check if the block is contiguous
-                if fblock_start + fblock_count != pblock_idx {
-                    break;
-                }
-
-                fblock_count += 1;
-                iblk_idx += 1;
-            }
-
-            // Write contiguous blocks at once
-            let len = min(fblock_count as usize * BLOCK_SIZE, write_buf_len - written);
-
-            for i in 0..fblock_count {
-                let block_offset = fblock_start as usize * BLOCK_SIZE + i as usize * BLOCK_SIZE;
-                let mut block = Block::load(self.block_device.clone(), block_offset).await;
-                let write_size = min(BLOCK_SIZE, write_buf_len - written);
-                block.write_offset(0, &write_buf[written..written + write_size], write_size);
-                block.sync_blk_to_disk(self.block_device.clone()).await;
-                drop(block);
-                written += write_size;
-            }
-
-            fblock_start = 0;
-            fblock_count = 0;
-        }
-
-        // Final unaligned write if any
-        if written < write_buf_len {
-            let len = write_buf_len - written;
             // Get the physical block id, if the block is not present, append a new block
             let pblock_idx = if iblk_idx < ifile_blocks as usize {
                 self.get_pblock_idx(&inode_ref, iblk_idx as u32).await?
             } else {
                 // physical block not exist, append a new block
-                self.append_inode_pblk(&mut inode_ref).await?
+                self.append_inode_pblk_from(&mut inode_ref, &mut start_bgid)
+                    .await?
             };
 
-            let mut block =
-                Block::load(self.block_device.clone(), pblock_idx as usize * BLOCK_SIZE).await;
-            block.write_offset(0, &write_buf[written..], len);
+            let block_offset = pblock_idx as usize * BLOCK_SIZE;
+            let mut block = Block::load(self.block_device.clone(), block_offset).await;
+            let write_size = min(BLOCK_SIZE, write_buf_len - written);
+            block.write_offset(0, &write_buf[written..written + write_size], write_size);
             block.sync_blk_to_disk(self.block_device.clone()).await;
             drop(block);
-
-            written += len;
+            written += write_size;
+            iblk_idx += 1;
         }
 
         // Update file size if necessary
