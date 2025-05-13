@@ -392,7 +392,7 @@ impl Ext4 {
     ) -> Result<usize> {
         let old_size = inode_ref.inode.size();
 
-        assert!(old_size > new_size);
+        assert!(old_size >= new_size);
 
         if old_size == new_size {
             return Ok(EOK);
